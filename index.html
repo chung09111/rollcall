@@ -665,6 +665,191 @@ html, body {
   mo.observe(document.documentElement, {childList:true, subtree:true, attributes:true});
 })();
 </script>
+
+<!-- 整頁捲動＋控制區跟著捲走（解除 sticky/fixed 與內部捲動容器） -->
+<style>
+html, body { height: auto !important; overflow-y: auto !important; }
+.toolbar, .filters, .filter-bar, .right-panel, .sidebar, .control-panel, .sticky, .sticky-header {
+  position: static !important; top: auto !important; bottom: auto !important;
+}
+.right-panel, .sidebar, .panel, .container {
+  height: auto !important; max-height: none !important; overflow: visible !important;
+}
+/* 若仍有自訂的可捲容器，先放開（表格使用整頁捲動） */
+.scroll-container, .table-wrapper, .main-wrapper {
+  overflow: visible !important; max-height: none !important; height: auto !important;
+}
+</style>
+<script>
+(function(){
+  function unstickAll(){
+    const nodes = document.querySelectorAll('*');
+    for (const el of nodes){
+      const cs = getComputedStyle(el);
+      if (cs.position === 'sticky' || cs.position === 'fixed'){
+        el.style.position = 'static';
+        el.style.top = 'auto';
+        el.style.bottom = 'auto';
+      }
+      if ((cs.overflowY === 'auto' || cs.overflowY === 'scroll') && el.getBoundingClientRect().height > 200){
+        el.style.overflowY = 'visible';
+        el.style.maxHeight = 'none';
+        el.style.height = 'auto';
+      }
+      if (/vh$/.test(cs.height) || /vh$/.test(cs.maxHeight)){
+        el.style.height = 'auto';
+        el.style.maxHeight = 'none';
+      }
+    }
+  }
+  document.addEventListener('DOMContentLoaded', unstickAll);
+  window.addEventListener('load', () => setTimeout(unstickAll, 300));
+  const mo = new MutationObserver(() => unstickAll());
+  mo.observe(document.documentElement, {childList:true, subtree:true, attributes:true});
+})();
+</script>
+
+
+<!-- GAS 同步保固版（自動建立同步按鈕、2秒輪詢、點名寫回） -->
+<script>
+(function(){
+  if (window.__GAS_SYNC_PATCHED__) return;
+  window.__GAS_SYNC_PATCHED__ = true;
+
+  function ensureToolbar() {
+    let tb = document.querySelector('.toolbar');
+    if (!tb) {
+      tb = document.createElement('div');
+      tb.className = 'toolbar';
+      tb.style.margin = '8px 0';
+      tb.style.display = 'flex';
+      tb.style.gap = '8px';
+      document.body.prepend(tb);
+    }
+    return tb;
+  }
+  const toolbar = ensureToolbar();
+
+  var CONFIG = { API_URL: 'https://script.google.com/macros/s/AKfycbwoLAW6duLEPW9zD-iBTChsXLcrQANPG4jYNSoPht4Ep1j0Njc_QrLN7Lsyb3TEuHeN/exec' };
+  async function callAPI(fn, params={}){
+    const body = new URLSearchParams(Object.assign({fn}, params));
+    const res = await fetch(CONFIG.API_URL, { method:'POST', body });
+    return await res.json();
+  }
+
+  function ensureButtons(){
+    if (!document.getElementById('enableSync')) {
+      const b1 = document.createElement('button');
+      b1.id = 'enableSync'; b1.textContent = '啟用雲端同步'; b1.className = 'btn';
+      toolbar.prepend(b1);
+      b1.addEventListener('click', enableSync);
+    }
+    if (!document.getElementById('loadFromCloud')) {
+      const b2 = document.createElement('button');
+      b2.id = 'loadFromCloud'; b2.textContent = '從雲端載入名單'; b2.className = 'btn';
+      toolbar.prepend(b2);
+      b2.addEventListener('click', loadRosterFromCloud);
+    }
+  }
+  ensureButtons();
+
+  const SYNC = { enabled:false, role:'viewer', timer:null, date:'', session:'' };
+
+  async function loadRosterFromCloud(){
+    const data = await callAPI('list');
+    if (data.error){ alert('雲端名單錯誤：'+data.error); return; }
+    if (!window.roster) window.roster = [];
+    window.roster = (data.rows||[]).map((r,idx)=>({
+      idx, class:r.class||'', seat:r.seat||'', id:r.id||'', name:r.name||'', note:r.note||'', present:false
+    }));
+    if (typeof window.rebuildFilters==='function') window.rebuildFilters();
+    if (typeof window.renderTable==='function') window.renderTable();
+  }
+
+  async function enableSync(){
+    const dateEl = document.getElementById('attDate');
+    const sessionEl = document.getElementById('session');
+    SYNC.date = dateEl ? dateEl.value : new Date().toISOString().slice(0,10);
+    SYNC.session = sessionEl ? sessionEl.value.trim() : '第1節';
+    const me = await callAPI('whoami');
+    SYNC.role = me.role || 'viewer';
+    SYNC.enabled = true;
+    await applyStateFromCloud();
+    if (SYNC.timer) clearInterval(SYNC.timer);
+    SYNC.timer = setInterval(applyStateFromCloud, 2000);
+    alert('已啟用雲端同步（你的權限：'+SYNC.role+'）');
+  }
+
+  async function applyStateFromCloud(){
+    if (!SYNC.enabled) return;
+    const st = await callAPI('getState', { date: SYNC.date, session: SYNC.session });
+    const map = (st && st.items) || {};
+    if (!Array.isArray(window.roster)) return;
+    window.roster.forEach(r=>{
+      const key = [r.class||'', r.seat||'', r.id||'', r.name||''].join('|');
+      if (key in map) {
+        const s = map[key];
+        r.present = !!s.present;
+        if (typeof s.note === 'string') r.note = s.note;
+      }
+    });
+    if (typeof window.renderTable==='function') window.renderTable();
+  }
+
+  function hookActions(){
+    if (typeof window.toggleRow === 'function' && !window.__toggleRowHooked) {
+      const __orig = window.toggleRow;
+      window.toggleRow = async function(tr){
+        if (SYNC.enabled && SYNC.role==='viewer') return;
+        __orig(tr);
+        if (SYNC.enabled) {
+          const idx = Number(tr.dataset.idx);
+          const r = window.roster.find(x=>x.idx===idx);
+          if (r) await callAPI('setState', {
+            date: SYNC.date, session: SYNC.session,
+            class:r.class||'', seat:r.seat||'', id:r.id||'', name:r.name||'',
+            present: r.present ? 1 : 0, note: r.note||''
+          });
+        }
+      };
+      window.__toggleRowHooked = true;
+    }
+    const btnP = document.getElementById('markAllPresent');
+    const btnA = document.getElementById('markAllAbsent');
+    if (btnP && !btnP.__hooked){
+      btnP.addEventListener('click', async ()=>{
+        if (SYNC.enabled && SYNC.role==='viewer') return;
+        if (typeof window.markAll==='function') window.markAll(true);
+        if (SYNC.enabled && Array.isArray(window.roster)) {
+          for (const r of window.roster) {
+            await callAPI('setState', { date: SYNC.date, session: SYNC.session,
+              class:r.class||'', seat:r.seat||'', id:r.id||'', name:r.name||'',
+              present:1, note:r.note||'' });
+          }
+        }
+      });
+      btnP.__hooked = true;
+    }
+    if (btnA && !btnA.__hooked){
+      btnA.addEventListener('click', async ()=>{
+        if (SYNC.enabled && SYNC.role==='viewer') return;
+        if (typeof window.markAll==='function') window.markAll(false);
+        if (SYNC.enabled && Array.isArray(window.roster)) {
+          for (const r of window.roster) {
+            await callAPI('setState', { date: SYNC.date, session: SYNC.session,
+              class:r.class||'', seat:r.seat||'', id:r.id||'', name:r.name||'',
+              present:0, note:r.note||'' });
+          }
+        }
+      });
+      btnA.__hooked = true;
+    }
+  }
+  hookActions();
+  const mo = new MutationObserver(()=>{ ensureButtons(); hookActions(); });
+  mo.observe(document.documentElement, { childList:true, subtree:true });
+})();
+</script>
 </body>
 
 <script>
