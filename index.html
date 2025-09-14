@@ -1,0 +1,757 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>出席勾選系統（XLSX + 欄位篩選）</title>
+  <style>
+    :root{
+      --bg:#f7f7fb; --line:#e5e7eb; --thead:#e2e8f0; --hi:#fff8dc; --hi-hover:#fef9c3;
+      --ok:#16a34a; --sticky:#f8fafc; --brand:#2563eb; --ring:rgba(37,99,235,.25);
+    }
+    *{ box-sizing:border-box }
+    body { font-family: system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif; background:var(--bg); margin:0; color:#111; }
+    header { padding:12px 14px; position:sticky; top:0; background:rgba(255,255,255,.9); backdrop-filter:blur(6px); border-bottom:1px solid var(--line); z-index:10; }
+    h1 { margin:0 0 6px 0; font-size:1.2rem; }
+    .wrap{ max-width:1200px; margin:0 auto; }
+    .row{ display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+    .card{ background:#fff; border:1px solid var(--line); border-radius:12px; padding:10px; }
+    label{ font-size:.9rem; color:#475569 }
+    input[type="file"], select, input[type="date"], input[type="text"]{
+      padding:8px 10px; border:1px solid var(--line); border-radius:10px; background:#fff; outline:none;
+    }
+    input[type="file"]:focus, select:focus, input[type="date"]:focus, input[type="text"]:focus{
+      box-shadow:0 0 0 3px var(--ring); border-color:var(--brand);
+    }
+    .btn { border:1px solid var(--line); background:#fff; padding:8px 12px; border-radius:10px; cursor:pointer; font-weight:600; }
+    .btn.primary{ background:var(--brand); color:#fff; border-color:var(--brand) }
+    .btn.active { outline:3px solid rgba(22,163,74,.25); }
+    .toolbar { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+    .stats { display:flex; gap:10px; flex-wrap:wrap; font-size:.95rem; color:#374151; margin-top:8px; }
+    .stat { background:#fff; border:1px solid var(--line); border-radius:10px; padding:6px 10px; }
+    .hint{ color:#6b7280; font-size:.9rem; margin-top:6px }
+    main { padding:12px 14px; }
+    table { width:100%; border-collapse: separate; border-spacing:0; margin-top:10px; background:#fff; border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+    thead th { background:var(--thead); position:sticky; top:0; padding:10px; border-bottom:1px solid var(--line); z-index:2; }
+    td, th { border-bottom:1px solid var(--line); padding:8px 10px; }
+    tbody td { background:#fff; }
+    tr:hover { background:var(--hi-hover); cursor:pointer; }
+    /* 出席高亮（淺黃反白） */
+    tr.present { background:var(--hi); color:#111; font-weight:600; }
+    tr.present td { background:var(--hi); }
+    /* 勾勾欄位（sticky） */
+    .check { width:54px; text-align:center; position:sticky; left:0; z-index:1; background:var(--sticky); border-right:1px solid var(--line); }
+    tbody .check { background:#fff; }
+    tbody tr.present .check { background:var(--hi); }
+    .check .mark { display:inline-block; width:1.6em; height:1.6em; line-height:1.6em; border-radius:999px; border:2px solid var(--line); font-size:18px; font-weight:900; }
+    tr.present .check .mark { border-color:var(--ok); color:var(--ok); }
+    .search{ flex:1; min-width:220px }
+    .filters { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px }
+    .filters select{ min-width:150px }
+    @media (max-width:900px){ table{ font-size:15px } thead th:first-child{ left:0; position:sticky; z-index:3 } }
+    @media print{ header,.no-print{ display:none !important } body{ background:#fff } .card{ border:0 } }
+  
+/* 顏色強化 */
+thead th { background:#e0f2fe; } /* 淺藍表頭 */
+tr.present { background:#fff8dc; color:#065f46; font-weight:bold; } /* 出席行淡黃+深綠字 */
+.filter-chip { background:#eff6ff; border:1px solid #bfdbfe; color:#1e3a8a; } /* 篩選標籤淡藍 */
+select:focus, input[type="text"]:focus { box-shadow:0 0 0 3px rgba(59,130,246,0.4); border-color:#3b82f6; } /* focus 藍框 */
+.filters select:hover { background:#f0f9ff; } /* 篩選選單 hover 淡藍 */
+/* 篩選列彩色標題 */
+#fClass { border-color:#60a5fa; }
+#fSeat { border-color:#c084fc; }
+#fId { border-color:#fbbf24; }
+
+/* —— 工具列按鈕配色 —— */
+.btn{ transition:background .15s ease, color .15s ease, box-shadow .15s ease, border-color .15s ease; border-radius:12px; }
+#filterAll{ background:#dbeafe; color:#1e40af; border-color:#bfdbfe; }
+#filterAll:hover{ background:#bfdbfe; }
+#filterAll.btn.active{ box-shadow:0 0 0 3px rgba(59,130,246,.35); }
+
+#filterPresent{ background:#dcfce7; color:#166534; border-color:#bbf7d0; }
+#filterPresent:hover{ background:#bbf7d0; }
+#filterPresent.btn.active{ box-shadow:0 0 0 3px rgba(34,197,94,.35); }
+
+#filterAbsent{ background:#fee2e2; color:#991b1b; border-color:#fecaca; }
+#filterAbsent:hover{ background:#fecaca; }
+#filterAbsent.btn.active{ box-shadow:0 0 0 3px rgba(239,68,68,.35); }
+
+#markAllPresent{ background:#16a34a; color:#fff; border-color:#16a34a; }
+#markAllPresent:hover{ background:#15803d; border-color:#15803d; }
+
+#markAllAbsent{ background:#4b5563; color:#fff; border-color:#4b5563; }
+#markAllAbsent:hover{ background:#374151; border-color:#374151; }
+
+#clearFilter{ background:#f3f4f6; color:#111827; border-color:#e5e7eb; }
+#clearFilter:hover{ background:#e5e7eb; }
+
+.btn:focus{ box-shadow:0 0 0 3px rgba(37,99,235,.25); outline:none; }
+
+
+/* === 可配置主題變數 === */
+:root{
+  --brand:#2563eb;           /* 主色 */
+  --surface:#ffffff;         /* 卡片/表面 */
+  --bg:#f7f7fb;              /* 背景 */
+  --text:#111827;            /* 文字 */
+  --line:#e5e7eb;            /* 邊框 */
+  --thead:#e0f2fe;           /* 表頭 */
+  --present-bg:#fff8dc;      /* 出席列背景 */
+  --present-fg:#065f46;      /* 出席列文字 */
+  --ring:rgba(37,99,235,.25);
+}
+body.theme-dark{
+  --surface:#0f172a;
+  --bg:#0b1220;
+  --text:#e5e7eb;
+  --line:#334155;
+  --thead:#1f2937;
+  --present-bg:#1e293b;
+  --present-fg:#86efac;
+  --ring:rgba(59,130,246,.35);
+}
+/* 套用變數到主要區塊（不破壞既有彩色按鈕，但可被覆寫） */
+body { background:var(--bg); color:var(--text); }
+.card{ background:var(--surface); border-color:var(--line); }
+thead th { background:var(--thead) !important; }
+tr.present { background:var(--present-bg) !important; color:var(--present-fg) !important; }
+select:focus, input[type="text"]:focus { box-shadow:0 0 0 3px var(--ring) !important; border-color:var(--brand) !important; }
+
+/* 設定面板浮動按鈕 */
+#settingsFab{
+  position:fixed; right:16px; bottom:18px; z-index:50;
+  background:var(--brand); color:#fff; border:none; border-radius:14px;
+  padding:10px 12px; font-weight:700; cursor:pointer;
+  box-shadow:0 10px 24px rgba(0,0,0,.2);
+}
+#settingsFab:hover{ filter:brightness(1.05); }
+#settingsPanelBackdrop{
+  position:fixed; inset:0; background:rgba(0,0,0,.35); backdrop-filter:blur(2px);
+  display:none; z-index:60;
+}
+#settingsPanel{
+  position:fixed; right:24px; bottom:80px; width:360px; max-width:92vw;
+  background:var(--surface); color:var(--text); border:1px solid var(--line);
+  border-radius:16px; padding:14px; box-shadow:0 20px 40px rgba(0,0,0,.25); display:none; z-index:61;
+}
+#settingsPanel h3{ margin:0 0 8px 0; font-size:1.05rem }
+#settingsPanel .row{ display:flex; gap:8px; align-items:center; margin:6px 0; }
+#settingsPanel label{ flex:0 0 110px; font-size:.9rem; color:#64748b }
+#settingsPanel input[type="text"]{ flex:1; padding:8px 10px; border:1px solid var(--line); background:var(--surface); color:var(--text); border-radius:10px; }
+#settingsPanel select, #settingsPanel input[type='color']{ padding:8px 10px; border:1px solid var(--line); border-radius:10px; background:var(--surface); color:var(--text); }
+#settingsPanel .actions{ display:flex; gap:8px; justify-content:flex-end; margin-top:10px }
+#settingsPanel .btn{ border:1px solid var(--line); background:var(--surface); color:var(--text); padding:8px 12px; border-radius:10px; cursor:pointer; font-weight:600 }
+#settingsPanel .btn.primary{ background:var(--brand); color:#fff; border-color:var(--brand) }
+
+</style>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <h1>📋 出席勾選系統（XLSX + 欄位篩選）</h1>
+      <div class="row">
+        <div class="card">
+          <div class="row">
+            <div>
+              <label>匯入名單：</label><br>
+              <input id="file" type="file" accept=".xlsx,.xls,.csv" />
+            </div>
+            <div>
+              <label>工作表：</label><br>
+              <select id="sheet" disabled></select>
+            </div>
+            <div>
+              <label>點名日期：</label><br>
+              <input id="attDate" type="date">
+            </div>
+            <div>
+              <label>場次/節次（可選）：</label><br>
+              <input id="session" type="text" placeholder="例：第3節、早自習…" />
+            </div>
+          </div>
+          <div class="row" style="margin-top:8px">
+            <div class="btn" id="saveState">儲存狀態</div>
+            <div class="btn" id="exportAll">匯出 Excel（全記錄）</div>
+            <div class="btn" id="exportPresent">匯出 已出席</div>
+            <div class="btn" id="exportAbsent">匯出 未出席</div>
+          </div>
+          <div class="hint">※ 表頭至少包含「姓名」，建議包含「項目、組別、姓名」。支援表頭自動辨識（例如：項目/class；組別/no/seat）。</div>
+        </div>
+        <div class="card" style="flex:1">
+          <div class="row">
+            <input id="search" class="search" type="text" placeholder="搜尋姓名、組別、項目…" />
+            <div class="toolbar no-print">
+              <button id="filterAll" class="btn active">全部</button>
+              <button id="filterPresent" class="btn">只看出席</button>
+              <button id="filterAbsent" class="btn">只看未出席</button>
+              <button id="markAllPresent" class="btn">一鍵全出席</button>
+              <button id="markAllAbsent" class="btn">一鍵全未出席</button>
+              <button id="clearFilter" class="btn">清除篩選</button>
+            </div>
+          </div>
+          <div class="filters">
+            <label>項目：<select id="fClass"><option value="">（全部）</option></select></label>
+            <label>組別：<select id="fSeat"><option value="">（全部）</option></select></label>
+            <label>名次：<select id="fId"><option value="">（全部）</option></select></label>
+          </div>
+          <div class="stats">
+            <div class="stat">總數：<span id="sTotal">0</span></div>
+            <div class="stat">已出席：<span id="sPresent">0</span></div>
+            <div class="stat">未出席：<span id="sAbsent">0</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="card" style="margin-top:8px">
+        <div class="row">
+          <span>欄位對應：</span>
+          <label style="margin-left:6px">項目</label><select id="mapClass"></select>
+          <label>組別</label><select id="mapSeat"></select>
+          <label>名次</label><select id="mapId"></select>
+          <label>姓名</label><select id="mapName"></select>
+          <label>備註</label><select id="mapNote"></select>
+          <button class="btn" id="applyMap" title="套用欄位對應">套用</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <table id="table">
+      <thead>
+        <tr>
+          <th class="check" title="出席">✓</th>
+          <th>項目</th>
+          <th>組別</th>
+          <th>名次</th>
+          <th>姓名</th>
+          <th>備註</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </main>
+
+<script>
+(() => {
+  let workbook = null;
+  let rawRows = [];
+  let roster = []; // {class, seat, id, name, note, present}
+  let filterMode = 'all';
+  let colFilter = { class:'', seat:'', id:'' };
+
+  const els = {
+    file: document.getElementById('file'),
+    sheet: document.getElementById('sheet'),
+    attDate: document.getElementById('attDate'),
+    session: document.getElementById('session'),
+    search: document.getElementById('search'),
+    tableBody: document.querySelector('#table tbody'),
+    sTotal: document.getElementById('sTotal'),
+    sPresent: document.getElementById('sPresent'),
+    sAbsent: document.getElementById('sAbsent'),
+    filterAll: document.getElementById('filterAll'),
+    filterPresent: document.getElementById('filterPresent'),
+    filterAbsent: document.getElementById('filterAbsent'),
+    markAllPresent: document.getElementById('markAllPresent'),
+    markAllAbsent: document.getElementById('markAllAbsent'),
+    clearFilter: document.getElementById('clearFilter'),
+    saveState: document.getElementById('saveState'),
+    exportAll: document.getElementById('exportAll'),
+    exportPresent: document.getElementById('exportPresent'),
+    exportAbsent: document.getElementById('exportAbsent'),
+    mapClass: document.getElementById('mapClass'),
+    mapSeat: document.getElementById('mapSeat'),
+    mapId: document.getElementById('mapId'),
+    mapName: document.getElementById('mapName'),
+    mapNote: document.getElementById('mapNote'),
+    applyMap: document.getElementById('applyMap'),
+    fClass: document.getElementById('fClass'),
+    fSeat: document.getElementById('fSeat'),
+    fId: document.getElementById('fId'),
+  };
+
+  // default date = today (local)
+  const todayLocalISO = (() => {
+    const d = new Date();
+    const tzOffset = d.getTimezoneOffset();
+    const local = new Date(d.getTime() - tzOffset*60000);
+    return local.toISOString().slice(0,10);
+  })();
+  els.attDate.value = todayLocalISO;
+
+  function hashKey(str){
+    let h = 5381;
+    for (let i=0;i<str.length;i++) h = ((h<<5)+h) + str.charCodeAt(i);
+    return (h>>>0).toString(16);
+  }
+  function storageKey(){
+    const date = els.attDate.value || 'nodate';
+    const sess = (els.session.value || '').trim();
+    const fn = (els.file.files?.[0]?.name || 'nofile');
+    const sheet = els.sheet.value || 'sheet';
+    const rosterSig = roster.map(r => (r.class||'')+'#'+(r.seat||'')+'#'+(r.id||'')+'#'+(r.name||'')).join('|');
+    const sig = hashKey(fn+'|'+sheet+'|'+rosterSig+'|'+date+'|'+sess);
+    return 'attendance_filter:'+sig;
+  }
+
+  function normalizeHeader(h){
+    const s = String(h || '').trim().toLowerCase();
+    if (!s) return '';
+    if (['班','班級','class','班別','項目'].includes(s)) return 'class';
+    if (['座號','號','no','seat','number','#','序號','組別'].includes(s)) return 'seat';
+    if (['學號','學籍號','id','studentid','學號id','名次'].includes(s)) return 'id';
+    if (['姓名','name','學生姓名','student','full name'].includes(s)) return 'name';
+    if (['備註','備考','note','remark','備註欄'].includes(s)) return 'note';
+    return s;
+  }
+  function buildMapping(headers){
+    const norm = headers.map(normalizeHeader);
+    const find = key => {
+      const idx = norm.indexOf(key);
+      return idx >= 0 ? headers[idx] : '';
+    };
+    return {
+      class: find('class'),
+      seat: find('seat'),
+      id: find('id'),
+      name: find('name') || headers[0],
+      note: find('note')
+    };
+  }
+  function fills(sel, selected, headers){
+    sel.innerHTML = ['（不使用）', ...headers].map(h => `<option value="${h}" ${h===selected?'selected':''}>${h}</option>`).join('');
+  }
+  function populateMapSelectors(headers, mapping){
+    fills(els.mapClass, mapping.class || '（不使用）', headers);
+    fills(els.mapSeat,  mapping.seat  || '（不使用）', headers);
+    fills(els.mapId,    mapping.id    || '（不使用）', headers);
+    fills(els.mapName,  mapping.name  || headers[0], headers);
+    fills(els.mapNote,  mapping.note  || '（不使用）', headers);
+  }
+
+  function uniqueSorted(arr){
+    return Array.from(new Set(arr.map(v => String(v ?? '').trim()).filter(v => v !== ''))).sort((a,b)=>{
+      // numeric-aware sort if both numbers
+      const na = Number(a), nb = Number(b);
+      if (!isNaN(na) && !isNaN(nb)) return na - nb;
+      return a.localeCompare(b, 'zh-Hant');
+    });
+  }
+  function rebuildFilters(){
+    const classVals = uniqueSorted(roster.map(r => r.class));
+    const seatVals  = uniqueSorted(roster.map(r => r.seat));
+    const idVals    = uniqueSorted(roster.map(r => r.id));
+    const fillSel = (sel, values, cur) => {
+      const opts = ['<option value=\"\">（全部）</option>'].concat(values.map(v => `<option value="${v}" ${v===cur?'selected':''}>${v}</option>`));
+      sel.innerHTML = opts.join('');
+    };
+    fillSel(els.fClass, classVals, colFilter.class);
+    fillSel(els.fSeat, seatVals, colFilter.seat);
+    fillSel(els.fId, idVals, colFilter.id);
+  }
+
+  function applyMapping(){
+    if (!rawRows.length) return;
+    const map = {
+      class: els.mapClass.value === '（不使用）' ? '' : els.mapClass.value,
+      seat:  els.mapSeat.value  === '（不使用）' ? '' : els.mapSeat.value,
+      id:    els.mapId.value    === '（不使用）' ? '' : els.mapId.value,
+      name:  els.mapName.value  === '（不使用）' ? '' : els.mapName.value,
+      note:  els.mapNote.value  === '（不使用）' ? '' : els.mapNote.value,
+    };
+    roster = rawRows.map((row, idx) => ({
+      idx,
+      class: map.class ? (row[map.class] ?? '') : '',
+      seat:  map.seat  ? (row[map.seat]  ?? '') : '',
+      id:    map.id    ? (row[map.id]    ?? '') : '',
+      name:  map.name  ? (row[map.name]  ?? '') : '',
+      note:  map.note  ? (row[map.note]  ?? '') : '',
+      present: false,
+    })).filter(r => String(r.name||'').trim() !== '');
+    loadSavedState();
+    rebuildFilters();
+    renderTable();
+  }
+
+  function saveState(){
+    const payload = roster.map(r => ({
+      key: (r.class||'')+'|'+(r.seat||'')+'|'+(r.id||'')+'|'+(r.name||''),
+      present: !!r.present,
+      note: r.note || ''
+    }));
+    localStorage.setItem(storageKey(), JSON.stringify(payload));
+    alert('已儲存到本機（localStorage）。');
+  }
+  function loadSavedState(){
+    try{
+      const k = storageKey();
+      const saved = JSON.parse(localStorage.getItem(k) || 'null');
+      if (saved && Array.isArray(saved)) {
+        const byKey = new Map(saved.map(s => [s.key, s]));
+        roster.forEach(r => {
+          const key = (r.class||'')+'|'+(r.seat||'')+'|'+(r.id||'')+'|'+(r.name||'');
+          if (byKey.has(key)) {
+            const v = byKey.get(key);
+            r.present = !!v.present;
+            if (typeof v.note === 'string') r.note = v.note;
+          }
+        });
+      }
+    }catch(e){ console.warn('loadSavedState error', e); }
+  }
+
+  function visibleByFilter(r){
+    if (filterMode==='present' && !r.present) return false;
+    if (filterMode==='absent' && r.present) return false;
+    if (colFilter.class && String(r.class) !== colFilter.class) return false;
+    if (colFilter.seat  && String(r.seat)  !== colFilter.seat)  return false;
+    if (colFilter.id    && String(r.id)    !== colFilter.id)    return false;
+    return true;
+  }
+  function updateStats(){
+    const total = roster.filter(visibleByFilter).length;
+    const present = roster.filter(r => visibleByFilter(r) && !!r.present).length;
+    els.sTotal.textContent = total;
+    els.sPresent.textContent = present;
+    els.sAbsent.textContent = total - present;
+  }
+
+  function renderTable(){
+    const q = els.search.value.trim().toLowerCase();
+    const rows = roster.filter(r => {
+      const hay = (r.class+' '+r.seat+' '+r.id+' '+r.name+' '+(r.note||'')).toLowerCase();
+      let ok = hay.includes(q);
+      ok = ok && visibleByFilter(r);
+      return ok;
+    });
+
+    els.tableBody.innerHTML = rows.map(r => `
+      <tr data-idx="${r.idx}" class="${r.present?'present':''}" role="button" tabindex="0" aria-pressed="${r.present}">
+        <td class="check" aria-label="出席狀態"><span class="mark">${r.present?'✓':''}</span></td>
+        <td>${r.class||''}</td>
+        <td>${r.seat||''}</td>
+        <td>${r.id||''}</td>
+        <td>${r.name||''}</td>
+        <td contenteditable="true" class="js-note">${r.note||''}</td>
+      </tr>
+    `).join('');
+
+    // row interactions
+    els.tableBody.querySelectorAll('tr').forEach((tr) => {
+      tr.addEventListener('click', () => toggleRow(tr));
+      tr.addEventListener('keydown', e => { if(e.key==='Enter' || e.key===' '){ e.preventDefault(); toggleRow(tr); } });
+    });
+    els.tableBody.querySelectorAll('.js-note').forEach((cell) => {
+      cell.addEventListener('input', e => {
+        const tr = cell.closest('tr');
+        const idx = Number(tr.dataset.idx);
+        const row = roster.find(x => x.idx === idx);
+        row.note = cell.textContent;
+      });
+    });
+
+    updateStats();
+  }
+  function toggleRow(tr){
+    const idx = Number(tr.dataset.idx);
+    const row = roster.find(x => x.idx === idx);
+    row.present = !row.present;
+    tr.classList.toggle('present', row.present);
+    tr.setAttribute('aria-pressed', row.present);
+    const mark = tr.querySelector('.mark');
+    if (mark) mark.textContent = row.present ? '✓' : '';
+    updateStats();
+  }
+
+  function markAll(present){
+    roster.forEach(r => r.present = present);
+    renderTable();
+  }
+
+  function exportExcel(mode){
+    if (!roster.length){ alert('尚未有資料'); return; }
+    const date = els.attDate.value || '';
+    const sess = (els.session.value || '').trim();
+    const title = `出席_${date}${sess?('_'+sess):''}`;
+    let rows = roster.filter(visibleByFilter).map(r => ({
+      日期: date,
+      場次: sess,
+      項目: r.class || '',
+      組別: r.seat || '',
+      名次: r.id || '',
+      姓名: r.name || '',
+      出席: r.present ? '是' : '否',
+      備註: r.note || ''
+    }));
+    if (mode === 'present') rows = rows.filter(r => r['出席'] === '是');
+    if (mode === 'absent')  rows = rows.filter(r => r['出席'] === '否');
+
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(rows);
+    XLSX.utils.book_append_sheet(wb, ws, '出席');
+    XLSX.writeFile(wb, `${title}${mode==='present'?'_已出席':''}${mode==='absent'?'_未出席':''}.xlsx`);
+  }
+
+  // File handling
+  els.file.addEventListener('change', async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const buf = await file.arrayBuffer();
+    workbook = XLSX.read(buf, { type:'array' });
+    const sheetNames = workbook.SheetNames || [];
+    if (!sheetNames.length){ alert('讀不到工作表'); return; }
+
+    els.sheet.disabled = false;
+    els.sheet.innerHTML = sheetNames.map((n,i) => `<option value="${n}" ${i===0?'selected':''}>${n}</option>`).join('');
+    loadSheet(sheetNames[0]);
+  });
+  els.sheet.addEventListener('change', () => loadSheet(els.sheet.value));
+
+  function loadSheet(name){
+    const ws = workbook.Sheets[name];
+    const rows = XLSX.utils.sheet_to_json(ws, { defval:'', raw:false });
+    rawRows = rows;
+    const headers = Object.keys(rows[0] || { 姓名:'', 項目:'', 組別:'' });
+    const mapping = buildMapping(headers);
+    populateMapSelectors(headers, mapping);
+    applyMapping();
+  }
+
+  // Mapping override & UI actions
+  els.applyMap.addEventListener('click', () => { colFilter={class:'',seat:'',id:''}; applyMapping(); });
+  els.search.addEventListener('input', renderTable);
+  els.filterAll.addEventListener('click', () => setFilter('all'));
+  els.filterPresent.addEventListener('click', () => setFilter('present'));
+  els.filterAbsent.addEventListener('click', () => setFilter('absent'));
+  function setFilter(mode){
+    filterMode = mode;
+    document.querySelectorAll('.btn').forEach(b=>b.classList.remove('active'));
+    if (mode==='present') els.filterPresent.classList.add('active');
+    else if (mode==='absent') els.filterAbsent.classList.add('active');
+    else els.filterAll.classList.add('active');
+    renderTable();
+  }
+  els.clearFilter.addEventListener('click', () => {
+    els.search.value=''; setFilter('all'); colFilter={class:'', seat:'', id:''};
+    rebuildFilters(); renderTable();
+  });
+  els.markAllPresent.addEventListener('click', () => markAll(true));
+  els.markAllAbsent.addEventListener('click', () => markAll(false));
+  els.saveState.addEventListener('click', saveState);
+  els.exportAll.addEventListener('click', () => exportExcel('all'));
+  els.exportPresent.addEventListener('click', () => exportExcel('present'));
+  els.exportAbsent.addEventListener('click', () => exportExcel('absent'));
+
+  // Column filter listeners
+  els.fClass.addEventListener('change', () => { colFilter.class = els.fClass.value; renderTable(); });
+  els.fSeat.addEventListener('change', () => { colFilter.seat  = els.fSeat.value;  renderTable(); });
+  els.fId.addEventListener('change', () => { colFilter.id    = els.fId.value;    renderTable(); });
+
+  // Demo data (可移除)
+  // roster = [
+  //   {idx:0, class:'跳遠', seat:'A', id:1, name:'王小明', note:'', present:false},
+  //   {idx:1, class:'跳遠', seat:'A', id:2, name:'陳小華', note:'', present:true},
+  //   {idx:2, class:'跳高', seat:'B', id:1, name:'張大同', note:'', present:false},
+  // ]; rebuildFilters(); renderTable();
+})();
+</script>
+
+<button id="settingsFab" class="no-print" title="主題與文字設定">⚙️ 設定</button>
+<div id="settingsPanelBackdrop"></div>
+<div id="settingsPanel" class="no-print" role="dialog" aria-modal="true">
+  <h3>主題與文字設定</h3>
+  <div class="row">
+    <label>模式</label>
+    <select id="setThemeMode">
+      <option value="light">淺色</option>
+      <option value="dark">深色</option>
+    </select>
+  </div>
+  <div class="row">
+    <label>主色</label>
+    <input id="setBrand" type="color" value="#2563eb"/>
+  </div>
+  <div class="row"><label>「全部」</label><input id="lblAll" type="text" placeholder="全部"></div>
+  <div class="row"><label>「只看出席」</label><input id="lblPresent" type="text" placeholder="只看出席"></div>
+  <div class="row"><label>「只看未出席」</label><input id="lblAbsent" type="text" placeholder="只看未出席"></div>
+  <div class="row"><label>「一鍵全出席」</label><input id="lblMarkAllPresent" type="text" placeholder="一鍵全出席"></div>
+  <div class="row"><label>「一鍵全未出席」</label><input id="lblMarkAllAbsent" type="text" placeholder="一鍵全未出席"></div>
+  <div class="row"><label>「清除篩選」</label><input id="lblClear" type="text" placeholder="清除篩選"></div>
+  <div class="actions">
+    <button id="settingsReset" class="btn">回復預設</button>
+    <button id="settingsApply" class="btn primary">套用並儲存</button>
+  </div>
+</div>
+
+
+<style>
+.toolbar, .filters, .filter-bar, .right-panel, .sidebar, .control-panel, .sticky, .sticky-header {
+  position: static !important;
+  top: auto !important;
+}
+.right-panel, .sidebar, .panel, .container, body, html {
+  height: auto !important;
+  max-height: none !important;
+  overflow: visible !important;
+}
+</style>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const suspects = document.querySelectorAll(
+    '.toolbar, .filters, .filter-bar, .right-panel, .sidebar, .control-panel, .sticky, .sticky-header'
+  );
+  suspects.forEach(el => {
+    const pos = getComputedStyle(el).position;
+    if (pos === 'sticky' || pos === 'fixed') {
+      el.style.position = 'static';
+      el.style.top = 'auto';
+      el.style.bottom = 'auto';
+    }
+  });
+  const badScrollContainers = document.querySelectorAll('.scroll-container, .table-wrapper, .main-wrapper');
+  badScrollContainers.forEach(el => {
+    if (getComputedStyle(el).overflowY !== 'visible') {
+      el.style.overflowY = 'visible';
+      el.style.maxHeight = 'none';
+      el.style.height = 'auto';
+    }
+  });
+});
+</script>
+
+<!-- 強制控制區隨整頁捲動 -->
+<style>
+/* 放開全頁高度/捲動限制 */
+html, body {
+  height: auto !important;
+  overflow-y: auto !important;
+}
+</style>
+<script>
+(function(){
+  function unstickAll(){
+    const nodes = document.querySelectorAll('*');
+    for (const el of nodes){
+      const cs = getComputedStyle(el);
+      if (cs.position === 'sticky' || cs.position === 'fixed'){
+        el.style.position = 'static';
+        el.style.top = 'auto';
+        el.style.bottom = 'auto';
+      }
+      // 清除可能造成內捲的容器
+      if (cs.overflowY !== 'visible' && (cs.overflowY === 'auto' || cs.overflowY === 'scroll')){
+        // 僅對大型容器放開，避免破壞下拉選單
+        const h = el.getBoundingClientRect().height;
+        if (h > 200){
+          el.style.overflowY = 'visible';
+          el.style.maxHeight = 'none';
+          el.style.height = 'auto';
+        }
+      }
+      // 移除 100vh/固定高度造成的固定視窗
+      if (/vh$/.test(cs.height) || /vh$/.test(cs.maxHeight)){
+        el.style.height = 'auto';
+        el.style.maxHeight = 'none';
+      }
+    }
+  }
+  // 1) 初次執行
+  document.addEventListener('DOMContentLoaded', unstickAll);
+  // 2) 延遲再跑一次（給動態渲染）
+  window.addEventListener('load', () => setTimeout(unstickAll, 300));
+  // 3) 監看 DOM 變化，持續解除 sticky/fixed
+  const mo = new MutationObserver(() => unstickAll());
+  mo.observe(document.documentElement, {childList:true, subtree:true, attributes:true});
+})();
+</script>
+</body>
+
+<script>
+(function(){
+  const KEY = 'attendance_theme_settings_v2';
+  const $ = (id)=>document.getElementById(id);
+
+  const els = {
+    fab: $('settingsFab'), panel:$('settingsPanel'), backdrop:$('settingsPanelBackdrop'),
+    mode:$('setThemeMode'), brand:$('setBrand'),
+    lblAll:$('lblAll'), lblPresent:$('lblPresent'), lblAbsent:$('lblAbsent'),
+    lblMarkAllPresent:$('lblMarkAllPresent'), lblMarkAllAbsent:$('lblMarkAllAbsent'), lblClear:$('lblClear'),
+    apply:$('settingsApply'), reset:$('settingsReset'),
+    bAll:$('filterAll'), bPresent:$('filterPresent'), bAbsent:$('filterAbsent'),
+    bMarkAllPresent:$('markAllPresent'), bMarkAllAbsent:$('markAllAbsent'), bClear:$('clearFilter')
+  };
+
+  function openPanel(){ els.backdrop.style.display='block'; els.panel.style.display='block'; loadToPanel(); }
+  function closePanel(){ els.backdrop.style.display='none'; els.panel.style.display='none'; }
+  els.fab.addEventListener('click', openPanel);
+  els.backdrop.addEventListener('click', closePanel);
+
+  function loadSettings(){
+    try{ return JSON.parse(localStorage.getItem(KEY)||'null') || {}; }catch(e){ return {}; }
+  }
+  function saveSettings(s){ localStorage.setItem(KEY, JSON.stringify(s)); }
+
+  function applySettings(s){
+    // theme
+    const mode = s.mode || 'light';
+    document.body.classList.toggle('theme-dark', mode==='dark');
+    const brand = s.brand || '#2563eb';
+    // apply --brand variable
+    document.documentElement.style.setProperty('--brand', brand);
+
+    // labels
+    if (s.labels){
+      const L = s.labels;
+      if (L.all != null) els.bAll.textContent = L.all;
+      if (L.present != null) els.bPresent.textContent = L.present;
+      if (L.absent != null) els.bAbsent.textContent = L.absent;
+      if (L.markAllPresent != null) els.bMarkAllPresent.textContent = L.markAllPresent;
+      if (L.markAllAbsent != null) els.bMarkAllAbsent.textContent = L.markAllAbsent;
+      if (L.clear != null) els.bClear.textContent = L.clear;
+    }
+  }
+
+  function loadToPanel(){
+    const s = loadSettings();
+    els.mode.value = s.mode || 'light';
+    els.brand.value = s.brand || '#2563eb';
+    const L = s.labels || {};
+    els.lblAll.value = L.all || els.bAll.textContent;
+    els.lblPresent.value = L.present || els.bPresent.textContent;
+    els.lblAbsent.value = L.absent || els.bAbsent.textContent;
+    els.lblMarkAllPresent.value = L.markAllPresent || els.bMarkAllPresent.textContent;
+    els.lblMarkAllAbsent.value = L.markAllAbsent || els.bMarkAllAbsent.textContent;
+    els.lblClear.value = L.clear || els.bClear.textContent;
+  }
+
+  els.apply.addEventListener('click', () => {
+    const s = {
+      mode: els.mode.value,
+      brand: els.brand.value,
+      labels: {
+        all: els.lblAll.value.trim(),
+        present: els.lblPresent.value.trim(),
+        absent: els.lblAbsent.value.trim(),
+        markAllPresent: els.lblMarkAllPresent.value.trim(),
+        markAllAbsent: els.lblMarkAllAbsent.value.trim(),
+        clear: els.lblClear.value.trim(),
+      }
+    };
+    saveSettings(s);
+    applySettings(s);
+    closePanel();
+  });
+
+  els.reset.addEventListener('click', () => {
+    localStorage.removeItem(KEY);
+    applySettings({}); // back to defaults
+    closePanel();
+  });
+
+  // Apply on load
+  applySettings(loadSettings());
+})();
+</script>
+
+</html>
